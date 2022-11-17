@@ -1132,27 +1132,52 @@ jobs:
           Get-ChildItem "$HOME\bootjdk\$env:BOOT_JDK_VERSION\*\*" | Move-Item -Destination "$HOME\bootjdk\$env:BOOT_JDK_VERSION"
         if: steps.bootjdk.outputs.cache-hit != 'true'
 
-      - name: Ensure a specific version of MSVC is installed
-        run: >
-          Start-Process -FilePath 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe' -Wait -NoNewWindow -ArgumentList
-          'modify --installPath "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise" --quiet
-          --add Microsoft.VisualStudio.Component.VC.14.29.arm64'
-
       - name: Download ARM64 version of fixpath
         run: |
           curl -L "$env:FIXPATH_URL" -o "$env:GITHUB_WORKSPACE/jdk/fixpath.exe"
           $FileHash = Get-FileHash -Algorithm SHA256 "$env:GITHUB_WORKSPACE/jdk/fixpath.exe"
           $FileHash.Hash -eq $env:FIXPATH_SHA256
 
+      - name: Restore Devkit from cache
+        id: devkit
+        uses: actions/cache@v3
+        with:
+          path: $env:GITHUB_WORKSPACE/jdk/build/devkit/VS2019-16.11.20-devkit.tar.gz
+          key: VS2019-16.11.20-devkit-v1
+      
+      - name: Extract Devkit
+        run: |
+          $env:Path = "$HOME\cygwin\cygwin64\bin;$HOME\cygwin\cygwin64\bin;$env:Path" ;
+          $env:Path = $env:Path -split ";" -match "C:\\Windows|PowerShell|cygwin" -join ";" ;
+          tar -xf $env:GITHUB_WORKSPACE/jdk/build/devkit/VS2019-16.11.20-devkit.tar.gz -C $env:GITHUB_WORKSPACE/jdk/build/devkit
+        if: steps.devkit.outputs.cache-hit == 'true'
+
+      # - name: Ensure a specific version of MSVC is installed
+      #   run: >
+      #     Start-Process -FilePath 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe' -Wait -NoNewWindow -ArgumentList
+      #     'modify --installPath "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise" --quiet
+      #     --add Microsoft.VisualStudio.Component.VC.14.29.arm64'
+      #   if: steps.devkit.outputs.cache-hit != 'true'
+
+      - name: Create Windows Devkit 2019 environment
+        run: |
+          $env:Path = "$HOME\cygwin\cygwin64\bin;$HOME\cygwin\cygwin64\bin;$env:Path" ;
+          $env:Path = $env:Path -split ";" -match "C:\\Windows|PowerShell|cygwin" -join ";" ;
+          bash createWindowsDevkit2019.sh
+        working-directory: jdk/make/devkit
+        if: steps.devkit.outputs.cache-hit != 'true'
+
       - name: Configure
         run: >
           $env:Path = "$HOME\cygwin\cygwin64\bin;$HOME\cygwin\cygwin64\bin;$env:Path" ;
           $env:Path = $env:Path -split ";" -match "C:\\Windows|PowerShell|cygwin" -join ";" ;
           $env:BOOT_JDK = cygpath "$HOME/bootjdk/$env:BOOT_JDK_VERSION" ;
+          $env:DEVKIT = cygpath "$env:GITHUB_WORKSPACE/jdk/build/devkit/VS2019-16.11.20-devkit" ;
           & bash configure
           --with-conf-name=windows-aarch64
-          --with-msvc-toolset-version=14.29
           --openjdk-target=aarch64-unknown-cygwin
+          --with-devkit="$env:DEVKIT"
+          --with-build-devkit="$env:DEVKIT"
           ${{ matrix.flags }}
           --with-version-opt="$env:GITHUB_ACTOR-$env:GITHUB_SHA"
           --with-version-build=0
@@ -1160,10 +1185,6 @@ jobs:
           --with-build-jdk="$env:BOOT_JDK"
           --with-default-make-target="hotspot"
           --with-jvm-features=shenandoahgc
-          --with-ucrt-dll-dir="/cygdrive/c/progra~2/wi3cf2~1/10/bin/10.0.18362.0/arm64/ucrt/"
-          --with-msvcr-dll="/cygdrive/c/progra~2/micros~2/2019/Enterprise/VC/Redist/MSVC/1429~1.301/arm64/Microsoft.VC142.CRT/vcruntime140.dll"
-          --with-msvcp-dll="/cygdrive/c/progra~2/micros~2/2019/Enterprise/VC/Redist/MSVC/1429~1.301/arm64/Microsoft.VC142.CRT/msvcp140.dll"
-          --with-vcruntime-1-dll="/cygdrive/c/progra~2/micros~2/2019/Enterprise/VC/Redist/MSVC/1429~1.301/arm64/Microsoft.VC142.CRT/vcruntime140_1.dll"
         working-directory: jdk
 
       - name: Build
